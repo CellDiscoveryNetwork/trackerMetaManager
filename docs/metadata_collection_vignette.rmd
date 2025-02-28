@@ -1,0 +1,400 @@
+---
+title: "Collecting metadata in large-scale projects"
+subtitle: "A case study of the HCA integrated gut cell atlas"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "Kyle Kimler"
+output: 
+  html_document:
+    self_contained: true
+    css: style.css
+---
+
+```{r setup, include=FALSE}
+library(reticulate)
+use_virtualenv("/Users/kylekimler/pyenvs/metamanager", required = TRUE)
+Sys.setenv(RETICULATE_PYTHON = "/Users/kylekimler/pyenvs/metamanager/bin/python")
+```
+
+# Introduction
+
+Human experiments often have a complex design and a great deal of clinical covariates which can affect analysis. 
+The collection of these covariates can be a difficult process because they span multiple experimental levels. 
+This is especially true in single-cell experiments, where thousands of cells are collected per sample, and sometimes multiple samples are collected per individual.
+Here, we use the term *metadata* to refer to any variable related to the dataset, participant, sample, cell or gene except the core cellxgene expression matrix. 
+It is critical to organize these metadata sufficiently, and if we want to bring in prior data, we need to create or follow a standard metadata format to be able to make comparisons.
+When analyzing published data, required metadata fields are sometimes unavailable, so it is necessary to reach out to the authors of published data. 
+When reaching out, providing an online standardized metadata sheet improves accuracy, skips redundant data wrangling steps, and enhances collaboration. 
+
+In this vignette, I will demonstrate methods for collecting and harmonizing metadata for human single-cell experiments on an atlas level using Google Sheets.
+We use this collection process in the HCA integrated gut cell atlas project.
+
+## Design of Metadata
+
+The HCA provides a required metadata schema that also includes metadata fields required by CELLxGENE. The HCA metadata guidelines are highly detailed (https://data.humancellatlas.org/metadata).
+The HCA follows similar guidelines to CELLxGENE, which is more simply detailed here (https://cellxgene.cziscience.com/docs/032__Contribute%20and%20Publish%20Data) in terms of single-cell data analysis.
+We adhere to both schema to make dataset upload to the portals easier. The following portals increase public data accessibility and offer unique methods.
+
+- *CZI*: [CELLxGENE.cziscience.com](https://cellxgene.cziscience.com/): A highly optimized/efficient app for working with single-cell data
+- *HCA*: [data.humancellatlas.org](https://data.humancellatlas.org/): A platform for storing data for use in meta-atlases
+- *CAP*: [celltype.info](https://celltype.info): An analysis app similar to CELLxGENE with a focus on crowd-sourcing celltype annotations
+
+The metadata schema used by these platforms has several useful delineations - one is separation of patient-protected and tissue-specific metadata fields from common-to-all human experiments metadata fields.
+HCA terms these Tier 1 (common metadata) and Tier 2 (patient-protected and tissue-specific). 
+
+Some fields in the schema are coded according to standards decided by large international bioinformatic consortia like the EBI ontology Service [https://www.ebi.ac.uk/ols4/],
+These are outlined on the metadata schema above, while others accept free text. 
+
+In this vignette, we will create separate google sheets for defining and collecting tier 1 (common and public) and tier 2 (patient-protected and tissue-specific) metadata.
+These two metadata tiers should be collected separately. Tier 1 can be collected rapidly to make the datasets more accessible,
+while Tier 2 metadata should be carefully considered by the project team and collected via secure channels. 
+
+In steps 1 and 2, the metadata DEFINITIONS file (in gold in the workflow image) is created ONCE for a meta-analysis or experimental project,
+then in steps 3 to 5, the metadata ENTRY files (in green) can be created and updated iteratively to collect the actual metadata.
+
+# Steps 1 and 2: Defining Metadata
+
+![*Metadata Workflow - Steps 1 and 2*](/Users/kylekimler/gitHub/metaManager-HCA/docs/GCA_metadata_workflow_1.png)
+
+The first step in the metadata management process is to create rigid definitions for the metadata. 
+
+It is important to be as comprehensive as possible before we begin collecting data, 
+while allowing ourselves the possibility of adding or editing fields down the line. 
+We can do both by creating a google sheet where metadata are defined and allowed entries for each are listed. 
+The google sheet format allows for collaborative editing, and rigid definitions make downstream analysis much easier.
+
+Beyond codes and ontology schema, most metadata fields can be standardized to some degree.
+For example, fields like "sample_collection_method" are coded to fit a standard, 
+others like "development_stage_ontology_term_id" must adhere to a 10-year age range in tier 1 metadata to avoid identification,
+while others like "library_id" must follow a certain pattern like a string with no special characters.
+
+First, we create a google sheet to define metadata fields and allowed values for each metadata field, 
+which is shared, discussed, and filled out by experimentalists and those doing the analysis. 
+
+For this workflow, this Google Sheet should contain 
+- several tabs, one for each type of metadata - we typically use "dataset", "donor", "sample", and "celltype". 
+- a special "key" column in the first column of each tab, "dataset_id", "donor_id", "sample_id", "author_cell_type". We should also include dataset_id and donor_id in the "sample" tab.
+- names of metadata fields which have unique values per key as column headers
+
+(Example Metadata Definitions Sheet)[https://docs.google.com/spreadsheets/d/1Jz02P7ZnqaigofvXVOxrYJh9bhvHa7nY-4EdJrt4BRA/]
+[/Users/kylekimler/gitHub/metaManager-HCA/docs/Example_allowed_entries_sheet.png]
+
+Next, this google sheet is used to format two metadata entry google sheets per dataset, tier 1 and tier 2, which can then be sent to authors of existing studies or used for new experiments. 
+
+To create these sheets, we have built a python library that help generating google sheets with dropdown menus.
+
+First, download and install the python code at: [https://github.com/CellDiscoveryNetwork/MetaManager]
+
+## Step 1: Package setup and loading the metadata definitions Google Sheet
+
+```{python set up libraries, echo=TRUE}
+from hca_metadata_manager.config import *
+from hca_metadata_manager.utils import *
+from hca_metadata_manager.workflow import *
+from hca_metadata_manager.plots import * 
+
+import re
+import pandas as pd
+import seaborn as sns
+```
+
+Before we can access Google Sheets with Python, the google drive python software must be initialized using the python library. 
+To communicate with Google Sheets, we need an authentication .json credentials file - this must be created as detailed by their documentation:
+[https://developers.google.com/sheets/api/quickstart/go] 
+
+Once we have downloaded the .json file, we can use it to allow python to access Google Sheets
+```{python initialize google sheets, echo=TRUE}
+gc = initialize_google_sheets()
+
+# The .json key you downloaded
+credentials_file = "/Users/kylekimler/OAuth_kk_metadata_uploader2.json"
+
+# Specify which Google API we are using - Spreadsheets and Drive
+scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+
+# To access GDrive, we authenticate python with GDrive, which creates an updated credentials object which we can use for the rest of the script
+credentials = authenticate_with_google(scopes, credentials_file)
+
+# First, find the google sheet ID of the allowed metadata definitions sheet, found as suffix of the URL of the google sheet
+# For example, if your google sheet is https://docs.google.com/spreadsheets/d/1eLBCEDKErmDK_nFIkOpATNbbBnnSVpoeqqPJ2uJKWrs
+# Then the id is:
+spreadsheet_id = '1N_Lyw6ZmcxS-3g49-oB98c6E5nuTVvbOQe3I_Myehxw'
+
+# Next, open the google sheet using the GDrive API
+spreadsheet = gc.open_by_key(spreadsheet_id)
+```
+
+## Step 2: Downloading the metadata google sheet with Python
+Once we've opened the metadata definitions sheet, we can download and convert it into a list of pandas dataframes, one per tab.
+
+```{python load definitions google sheet, echo = TRUE}
+tabs = ['Tier 1 Dataset Metadata', 'Tier 1 Donor Metadata', 'Tier 1 Sample Metadata', 'Tier 1 Celltype Metadata', 'Tier 2 Dataset Metadata', 'Tier 2 Donor Metadata', 'Tier 2 Sample Metadata']
+metadata_dfs = {}
+for tab in tabs:
+    worksheet = spreadsheet.worksheet(tab)
+    data = worksheet.get_all_records()
+    metadata_dfs[tab] = pd.DataFrame(data)
+
+# And display what was in the sheet:
+for tab, df in metadata_dfs.items():
+    print(f"First few rows of {tab}:")
+    print(df.head())
+    break
+```
+
+After downloading the google sheet containing the allowed metadata entries, we add examples and descriptions as our friends at HCA have created.
+We could alternatively have these as header rows in the metadata definitions Google Sheet.
+I have placed the HCA/CELLxGENE descriptions sheet in the data/metadata_descriptions.csv. We can load and add these as header columns automatically using built-in functions here
+```{python add metadata descriptions, echo=TRUE}
+metadata_dfs = add_metadata_descriptions(metadata_dfs)
+for tab, df in metadata_dfs.items():
+    print(f"First few rows of {tab}:")
+    print(df.head())
+    break
+```
+
+Now that we have the data describing the metadata fields and dropdowns we want to include in the data entry google sheets, we need a google drive folder to store all our sheets. 
+Go to https://drive.google.com and create a new folder via the top left + button. 
+
+Then, navigate to the new folder and take the URL suffix which we will need to find the folder.
+
+For example, this folder: https://drive.google.com/drive/folders/1viymICEcfl5JOeVXxKxNDaQhTiHUEZKR,
+the suffix is 1viymICEcfl5JOeVXxKxNDaQhTiHUEZKR.
+
+# Steps 3 to 5: Generating, tracking, and sharing metadata entry sheets
+
+Metadata entry google sheets can be created with empty rows to send to new authors or collaborators to aid in experimental design
+Or they can be created to help collect metadata for experiments that have already been published online.
+
+This automated method for generating sheets can be extra helpful for meta-analyses that require communication with authors.
+
+By automating and restricting metadata, we can communicate more efficiently with authors as follows:
+
+![*Metadata Workflow - Steps 3 to 5*](/Users/kylekimler/gitHub/metaManager-HCA/docs/GCA_metadata_workflow_2.png)
+
+## Step 3: Generating an empty metadata entry google sheet
+Since tier 1 and tier 2 metadata must be collected separately, we create a separate google sheet for each. 
+These google sheets contain the tabs specified in the metadata definitions sheet above. A single function in the library creates both sheets based on the pandas dataframe lists we built before.
+```{python generate metadata sheets, echo=TRUE}
+
+folder_id = "1viymICEcfl5JOeVXxKxNDaQhTiHUEZKR"
+
+# specify number of header rows beyond 
+generate_empty_metadata_entry_sheets(metadata_dfs, # The pandas df's containing metadata fields and dropdown menu options for each
+                                    gc, # The communication service we created before
+                                    credentials, # The credentials object we made using our .json key
+                                    folder_id, # The URL suffix of the GDrive folder to place the empty Google Sheets
+                                    dataset_id = 'Kimler2025', # The name of the study we are collecting metadata for
+                                    num_header_rows = 3) # The number of header rows, not including row names or "fill below banner", we want to include before setting dropdown menus
+```
+
+![*Example metadata tab*](/Users/kylekimler/gitHub/metaManager-HCA/docs/Example_metadata_tab2.png)
+<!-- 
+#### Step 3.2 Generating and pre-filling a google sheet using an existing h5ad file
+
+We can also fill one of these entry metadata sheets using an existing h5ad file. This way, the key columns (sample_id, donor_id, etc) are pre-defined based on the data. -->
+
+## Step 4: Determining the completeness of metadata entry
+
+Some mistakes can be easily fixed, while others have to be addressed by the authors themselves. 
+Since the google sheets are accessible online, anyone can edit them to help out, 
+and we can provide guidance by loading them from their URL's and determining whether they are correct and complete.
+
+For the entries that have dropdown menus, we can simply check if they were filled out or not, while for free text entries,
+we can check if they match some pattern or are strings or integers to determine if the entered values follow HCA requirements, do not contain special characters, or fit other expected criteria
+
+```{python list google sheets google sheet, echo = TRUE}
+# First, specify the folder where we will download all our metadata entry google sheets
+folder_id = '1Bg7NpsChMNUvSOasqP6iyQ4Et0SpyrZo'
+
+# Then list the google sheets in that folder
+googlesheets = list_google_sheets(credentials, folder_id)
+```
+
+In this example we have collected harmonized metadata for over 15 studies, which we can then load into python directly from the Google Sheets using the library
+
+```{python load google sheets, echo=TRUE}
+metadata = load_sheets_metadata(credentials, googlesheets)
+```
+
+At this point, to be able to tell whether the data was filled in correctly and completely, we need to create a dictionary of allowed values.
+For the dropdown menus, this should be easy, we can just compare them to lists of data. For free text entries, we can create other rules with regular expressions.
+
+In the code for this document, rules are created for most of the included metadata. 
+Here I will show a subset of these rules
+
+```{python creating rules to check correctness}
+# Other tier2 metadata we need for downstream analysis
+allowed_radial_tissue_term = ['EPI', 'LP', 'MUSC', 'EPI_LP' ,'LP_MUSC', 'EPI_LP_MUSC']
+allowed_age_range = ['0-1', '1-4', '5-14', '15-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-99', '100-']
+allowed_development_stage_ontology_term_id = ['HsapDv:0000261','HsapDv:0000265','HsapDv:0000271','HsapDv:0000268',
+                                             'HsapDv:0000237','HsapDv:0000238','HsapDv:0000239','HsapDv:0000240',
+                                             'HsapDv:0000241','HsapDv:0000242','HsapDv:0000243','HsapDv:0000244',
+                                             'HsapDv:0000247'] # Tier1 requirement is "unknown", but we need this as part of tier2 for analysis 
+
+# once we have the lists, we create a dictionary out of them.
+# We don't call this allowed_, because we are searching global vars for prefix allowed_ so we call this "permitted_" 
+permitted_values_dict = {
+    name.split('_', 1)[1]: value  # this removes the "allowed_"
+    for name, value in globals().items() # yep we can search through our python env vars to make this
+    if name.startswith('allowed_') and isinstance(value, list) # boom, here's our dict
+}
+
+# again, permitted instead of allowed, nice alliteration
+permitted_patterns_dict = {
+    # Dataset
+    'title':r'^.{1,}$', # a string with any number of characters
+    'study_pi':r'^.{1,}$', 
+    'doi': r'^10\.\d{4,9}/[-._;()/:A-Za-z0-9]+$', # DOI in its expected form - prefix 10, a ., then numbers, followed by any suffix (e.g. for journals)
+    'contact_email': r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', # a string with an @ and a domain name
+}
+
+```
+
+```{python, echo=FALSE}
+# Library
+#----------
+# Tier 1 - must
+allowed_reference_genome = ['GRCh38', 'GRCh37', 'GRCm39', 'GRCm38', 'GRCm37', 'not_applicable']
+allowed_sequenced_fragment = ["3'", "5'", "full-length"]
+# Tier 1 - recommended
+allowed_intron_inclusion = ['yes', 'no'] # important for single-cell and nucleus integration, therefore we ask for this specifically
+
+
+# CellxGene
+#----------
+# allowed_disease_ontology_term_id = ['PATO:0000461'] # This is the Tier1 requirement, but we need this as part of tier2 for analysis 
+# allowed_development_stage_ontology_term_id = ['unknown'] # This is the Tier1 requirement, but we need this as part of tier2 for analysis 
+allowed_self_reported_ethnicity_ontology_term_id = ['unknown'] # no ethnicity allowed in tier 1
+
+
+# Donor
+#----------
+# Tier 1 - must
+allowed_organism_ontology_term_id = ['NCBITaxon:9606'] # h. sapiens
+allowed_manner_of_death = ['not_applicable', 'unknown', '0', '1', '2', '3', '4'] # see configs  #TODO!! change not applicable
+allowed_sex_ontology_term_id = ['PATO:0000383', 'PATO:0000384'] #F, M
+
+
+# Sample
+#----------
+# Tier 1 - must
+allowed_tissue_ontology_term = ['duodenum', 'jejunum', 'ileum',
+                                'ascending_colon', 'transverse_colon','descending_colon',
+                                'sigmoid_colon', 'rectum', 'anal_canal',
+                                'small_intestine', 'colon', 'caecum',
+                                'gastrointestinal_system_mesentery', 'vermiform_appendix'
+                               ]
+allowed_tissue_ontology_term_id = ['UBERON:0002114','UBERON:0002115','UBERON:0002116',
+                                  'UBERON:0001156','UBERON:0001157','UBERON:0001158',
+                                  'UBERON:0001159','UBERON:0001052','UBERON:0000159',
+                                  'UBERON:0002108','UBERON:0001155', 'UBERON:0001153',
+                                  'UBERON:0004854', 'UBERON:0001154'
+                                  ]
+allowed_sample_source = ["surgical_donor", "postmortem_donor", "organ_donor"]
+allowed_sample_collection_method = ['biopsy', 'surgical_resection', 'brush']
+allowed_tissue_type = ["tissue", "organoid", "cell_culture"]
+allowed_sample_site_condition = ["healthy", "diseased", "adjacent"]
+allowed_sample_preservation_method = ['fresh', 'frozen']
+allowed_suspension_type = ['cell', 'nucleus', 'na']
+allowed_is_primary_data = ['FALSE', 'TRUE']
+
+# Tier 1 - recommended
+
+
+
+# Other tier2 metadata we need for downstream analysis
+allowed_radial_tissue_term = ['EPI', 'LP', 'MUSC', 'EPI_LP' ,'LP_MUSC', 'EPI_LP_MUSC']
+allowed_age_range = ['0-1', '1-4', '5-14', '15-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-99', '100-']
+allowed_development_stage_ontology_term_id = ['HsapDv:0000261','HsapDv:0000265','HsapDv:0000271','HsapDv:0000268',
+                                             'HsapDv:0000237','HsapDv:0000238','HsapDv:0000239','HsapDv:0000240',
+                                             'HsapDv:0000241','HsapDv:0000242','HsapDv:0000243','HsapDv:0000244',
+                                             'HsapDv:0000247'] # Tier1 requirement is "unknown", but we need this as part of tier2 for analysis 
+
+
+
+
+# since we're searching global vars for allowed_
+# don't name anything else with allowed_, so we call this "permitted_" hah
+permitted_values_dict = {
+    name.split('_', 1)[1]: value  # this removes the "allowed_"
+    for name, value in globals().items() # yep we can search through our python env vars to make this
+    if name.startswith('allowed_') and isinstance(value, list) # boom, here's our dict
+}
+
+# again, permitted instead of allowed, nice alliteration
+permitted_patterns_dict = {
+    # Dataset
+    'title':r'^.{1,}$', # tier1(uns) - must
+    'study_pi':r'^.{1,}$', #r'^[A-Za-z]+,[a-zA-Z0-9-]+$', # tier1(uns) - must
+    'doi': r'^10\.\d{4,9}/[-._;()/:A-Za-z0-9]+$', # tier1(uns) - must  # should be publication_doi
+    'contact_email': r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', # tier1(uns) - must
+    'description':r'^.{1,}$', # tier1(uns) - must
+    'consortia':r'^.{1,}$', # tier1(uns) - must
+    'cell_type_ontology_term_id':r'^CL:\d{7}$', # tier1(uns) - must
+
+    # Library
+    'gene_annotation_version':r'^.{1,}$', # tier1(uns) - must - so far non-empty, but needs to be ensembl version or NCBI/RefSeq ID (e.g. v110; GCF_000001405.40)
+    'alignment_software':r'^.{1,}$', # tier1(uns) - must - so far non-empty, but needs to be checked for standardized terms (e.g. cell ranger 3.0.1; kallisto bustools; GSNAP)
+    'library_id':r'^.{1,}$', # tier1(uns) - must
+    
+    # Donor
+    'donor_id':r'^.{1,}$', # tier1(uns) - must
+    #'sample_collection_site': r'^[A-Za-z_]+$', # alphabetical only, tier1(uns) - recommended
+    #'sample_collection_relative_time_point': r'^[A-Za-z0-9-.+-]+_[a-zA-Z0-9-.+-]+$', # alphanumeric + _- with _ delimiter (HCA pref), tier1(uns) - recommended
+    'disease_ontology_term_id': r'^(MONDO:\d{7}|PATO:0000461)$',  # Tier1 must is 'PATO:0000461' (see above) - here Tier2 and CellxGene metadata data definition, to add human phenotype terms: HP:\d{7}|
+    
+    # Sample
+    'sample_id':r'^.{1,}$', # tier1(uns) - must
+    'institute':r'^.{1,}$', # tier1(uns) - must  # currently in data set tab, but should be sample tab in excel sheet as data can be generated at multiple sites
+    'cell_enrichment': r'^CL:\d{7}$', # tier1(uns) - must
+    'assay_ontology_term_id': r'^EFO:\d{7}$', # tier1(uns) - must
+    'library_preparation_batch':r'^.{1,}$', # tier1(uns) - must
+    'library_sequencing_run':r'^.{1,}$',  # tier1(uns) - must
+    #'tissue_free_text':r'^.+$', # tier1(uns) - recommended
+    
+    
+}
+```
+
+Finally, using these terms and some library functions, we can create heatmaps to show which metadata are filled as we expected
+```{python, echo=TRUE}
+sns.set(font_scale=0.75)
+
+for metadata_type, df in metadata.items():
+    correctness_df = calculate_correctness_per_group(df, permitted_values_dict, permitted_patterns_dict)
+    plot_correctness_heatmap(correctness_df.T, f'{metadata_type.capitalize()} Metadata Correctness')  # Transpose for x-axis as fields
+```
+
+## Step 5: Instant feedback for metadata entry completeness
+
+To provide instant feedback for metadata contributors, we can upload these graphs to a simple website. 
+At the Cell Discovery Network, we use Google Cloud, which makes hosting tiny websites easy. 
+
+To host the heatmaps on google cloud, create an html file by knitting a small markdown file or converting a jupyter notebook with them
+in it. We have done this and created "metadata_correctness.html". Once we have the html, we can host it with GCP.
+Just upload it to a google bucket (usually best to create a new one) and give the bucket "allUsers" permissions on the bucket.
+Our google bucket is called "hca_gut_cell_atlas".
+
+Then, use the gcloud API in terminal to run one line to create the website:
+```{bash, evaluate=FALSE, echo=TRUE}
+gsutil web set -m metadata_correctness.html gs://hca_gut_cell_atlas
+```
+
+This sets the html as the homepage for the website, which you can access with the link:
+http://name_of_bucket.storage.googleapis.com/name_of_file.html
+*Please replace `name_of_bucket` and `name_of_file` with what you named these!*
+
+http://hca_gut_cell_atlas.storage.googleapis.com/metadata_correctness.html
+
+# Conclusion
+
+Now we have created restricted metadata entry sheets which multiple people can contribute to online, and we have a method for checking whether these were filled out correctly. 
+Google Sheets also has built-in version control, so if anything goes awry, the rewind button is built-in.
+As they are online and available to all collaborators, this method should help prevent siloing of bioinformaticians, medical staff, and experimentalists,
+and it streamlines large-scale collection of metadata from collaborators. 
+
+Once we have collected all of this data in Google Sheets, we can use other functions in the package to download and analyze the metadata alone, or attach it to anndata objects using the key column for each tab (dataset_id, donor_id, sample_id, author_cell_type).
+
+More on that soon.
+
+If you have any suggestions or questions regarding the pipeline, they are more than welcome! Thanks for reading.
