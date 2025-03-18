@@ -1,0 +1,47 @@
+---
+title: "Integrated Gut Cell Atlas Metadata Submission"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "Hyun Lee, Raquel Bartolome-Casado, Azucena Salas, Chris Lance, Kyle Kimler"
+output: 
+  html_document:
+    self_contained: true
+    css: style.css
+---
+
+##### Contributing authors can view heatmaps here that evaluate if the metadata they provided in Google Sheets conforms to expected metadata guidelines. 
+
+### Heatmap Descriptions
+
+The color of each tile represents the percentage of entries for that metadata which conform to the expected standard. 
+
+Locate your study and look across the metadata fields to determine if the metadata was entered correctly. Revise your google sheet where needed.
+
+### Dataset-level Metadata 
+
+```{r dataset heatmap, echo=FALSE, out.width='100%'}
+knitr::include_graphics("Dataset_correctness_heatmap.png")
+```
+
+
+### Donor-level Metadata
+
+```{r donor heatmap, echo=FALSE, out.width='100%'}
+knitr::include_graphics("Donor_correctness_heatmap.png")
+```
+
+### Sample-level Metadata
+
+```{r sample-heatmap, echo=FALSE, out.width='100%'}
+knitr::include_graphics("Sample_correctness_heatmap.png")
+```
+
+### Celltype-level Metadata
+
+```{r celltype-heatmap, echo=FALSE, out.width='100%'}
+knitr::include_graphics("Celltype_correctness_heatmap.png")
+```
+
+<div class="footer">
+  This report was generated automatically by the Integrated Gut Cell Atlas metadata team.
+</div>
+
