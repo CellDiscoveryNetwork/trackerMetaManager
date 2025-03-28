@@ -1,7 +1,7 @@
-from hca_metadata_manager.config import *
-from hca_metadata_manager.utils import *
-from hca_metadata_manager.workflow import *
-from hca_metadata_manager.plots import *
+from config import *
+from utils import *
+from workflow import *
+from plots import *
 
 import sys
 import re
@@ -15,12 +15,13 @@ import numpy as np
 import gspread
 
 import os
-from google.oauth2.service_account import Credentials
+import json
+from google.oauth2 import service_account
 import gspread
 
 # Google API configuration
 GOOGLE_API_CONFIG = {
-    'token_file': '/home/kkimler/gca_crontab/token.json',  # Path to token.json
+    'credentials_variable': 'GOOGLE_SERVICE_ACCOUNT',
     'scopes': ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
 }
 
@@ -28,16 +29,14 @@ def initialize_google_sheets2():
     """
     Initializes and returns a Google Sheets client authorized with OAuth2 credentials.
 
-    This function reads the token.json file, converts it into a Credentials object,
+    This function reads the service account environment variable, converts it into a Credentials object,
     and uses it to authorize a gspread client.
 
     Returns:
         gspread.client.Client: An authorized Google Sheets client instance.
     """
-    if not os.path.exists(GOOGLE_API_CONFIG['token_file']):
-        raise FileNotFoundError(f"Token file not found at {GOOGLE_API_CONFIG['token_file']}")
     # Load the token.json file
-    creds = Credentials.from_authorized_user_file(GOOGLE_API_CONFIG['token_file'], GOOGLE_API_CONFIG['scopes'])
+    creds = service_account.Credentials.from_service_account_info(json.loads(os.environ[GOOGLE_API_CONFIG['credentials_variable']]), scopes=GOOGLE_API_CONFIG['scopes'])
     # Use the credentials to authorize gspread
     gc = gspread.authorize(creds)
     return gc
@@ -45,31 +44,11 @@ def initialize_google_sheets2():
 from google.oauth2.credentials import Credentials
 import os
 
-def authenticate_with_google2(scopes, token_file):
-    """
-    Authenticates with Google API using token.json.
-
-    Args:
-        scopes (list): The API scopes required for access.
-        token_file (str): Path to the token.json file.
-
-    Returns:
-        google.oauth2.credentials.Credentials: Authenticated credentials object.
-    """
-    # Load credentials from token.json
-    if os.path.exists(token_file):
-        creds = Credentials.from_authorized_user_file(token_file, scopes)
-        if not creds.valid:
-            raise ValueError("Token is invalid or expired. Please regenerate it.")
-        return creds
-    else:
-        raise FileNotFoundError(f"Token file not found at {token_file}. Please generate it first.")
-
 gc = initialize_google_sheets2()
 
 credentials = authenticate_with_google(
     GOOGLE_API_CONFIG['scopes'],
-    GOOGLE_API_CONFIG['token_file']
+    GOOGLE_API_CONFIG['credentials_variable']
 )
 
 # The .json key you downloaded
@@ -81,7 +60,7 @@ credentials = authenticate_with_google(
 # To access GDrive, we authenticate python with GDrive, which creates an updated credentials object which we can use for the rest of the script
 #credentials = authenticate_with_google(scopes, credentials_file)
 
-folder_id = '13BWBL9QTddUYyBWzGtbHuujziMsrr7zv'
+folder_id = '1tT6R2WhOok-_gXRU7O0OudKDNVl44w4O'
 
 # Then list the google sheets in that folder
 googlesheets = list_google_sheets(credentials, folder_id)
@@ -516,7 +495,7 @@ def plot_data_correctness_heatmap2(df, title, meta_col_dict, permitted_values_di
             ax.annotate(category, xy=(pos + width / 2, data_for_plot.shape[0] + 0.5), xytext=(0, 10), textcoords='offset points', ha='center', va='center', fontsize=8, fontweight='bold', annotation_clip=False)
         plt.title(f'{title} Metadata Correctness', fontsize=10)
         plt.tight_layout()
-        plt.show()
+        # plt.show()
         filename = f"{title}_correctness_heatmap.png"
         plt.savefig(filename)
         plt.close()

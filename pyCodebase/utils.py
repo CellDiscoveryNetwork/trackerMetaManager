@@ -1,14 +1,12 @@
 import numpy as np
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 import googleapiclient.discovery
 from googleapiclient.discovery import build
 import traceback
-from .gdrive_config import GOOGLE_API_CONFIG, authenticate_with_google
-from .config import authenticate_with_google
+from gdrive_config import GOOGLE_API_CONFIG, authenticate_with_google
+from config import authenticate_with_google
 import pandas as pd
 import pkg_resources
 import time
@@ -42,7 +40,7 @@ def initialize_google_sheets():
     Example:
         >>> gc = initialize_google_sheets()
     """
-    creds = authenticate_with_google(GOOGLE_API_CONFIG['scopes'], GOOGLE_API_CONFIG['credentials_file'])
+    creds = authenticate_with_google(GOOGLE_API_CONFIG['scopes'], GOOGLE_API_CONFIG['credentials_variable'])
     gc = gspread.authorize(creds)
     return gc
 
