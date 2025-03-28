@@ -1,4 +1,4 @@
-from hca_metadata_manager.utils import * 
+from utils import * 
 import os
 from google_auth_oauthlib.flow import InstalledAppFlow
 from time import sleep

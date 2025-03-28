@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "trackermetamanager"
+version = "0.1.0"
+description = ""
+authors = []
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+numpy = "^2.2.4"
+pandas = "^2.2.3"
+gspread = "^6.2.0"
+oauth2client = "^4.1.3"
+google-auth-oauthlib = "^1.2.1"
+google-api-python-client = "^2.165.0"
+matplotlib = "^3.10.1"
+seaborn = "^0.13.2"
+setuptools = "^78.1.0"
+plotnine = "^0.14.5"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
